@@ -1,13 +1,11 @@
 package example.book.ch5
 import java.time.ZonedDateTime
-import util.{ Try, Success, Failure }
-import collection.mutable.{ Map => MMap }
-import scala.concurrent.Future
+import scala.util.{Try, Success, Failure}
+
 import cats._
 import cats.instances.all._
 import cats.syntax.all._
-import cats.data.{Validated, Kleisli, NonEmptyList}
-import Validated.{Valid, Invalid}
+import cats.data.{Validated, ValidatedNel, Kleisli, NonEmptyList}
 
 case class Account(no: String, name: String, balance: Balance, openingDate: ZonedDateTime, closingDate: Option[ZonedDateTime] = None)
 case class Balance(amount: Amount)
@@ -25,15 +23,15 @@ trait AccountRepository extends Repository[Account, String] {
   def query(id: String): Validated[Exception, Option[Account]]
   def store(a: Account): Validated[Exception, Account]
   def balance(no: String): Validated[Exception, Balance] = query(no) match {
-    case Valid(Some(a)) => Valid(a.balance)
-    case Valid(None) => Invalid(new Exception(s"No account exists with no $no"))
-    case Invalid(ex) => Invalid(ex)
+    case Validated.Valid(Some(a)) => Validated.Valid(a.balance)
+    case Validated.Valid(None) => Validated.Invalid(new Exception(s"No account exists with no $no"))
+    case Validated.Invalid(ex) => Validated.Invalid(ex)
   }
   def query(openedOn: ZonedDateTime): Validated[Exception, Seq[Account]]
 }
 
 trait ValidType {
-  type Valid[A] = Validated[NonEmptyList[String], A]
+  type Valid[A] = ValidatedNel[String, A]
 }
 
 trait AccountService[Account, Amount, Balance] extends ValidType {
@@ -52,17 +50,17 @@ trait AccountService[Account, Amount, Balance] extends ValidType {
 class AccountServiceInterpreter extends AccountService[Account, Amount, Balance] {
   def open(no: String, closeDate: Option[ZonedDateTime]): AccountOperation[Account] = Kleisli { repository =>
     repository.query(no) match {
-      case Valid(Some(account)) => NonEmptyList.of(s"Already existing account with no $no").invalid[Account]
-      case Valid(None) => ??? // run open new account
-      case Invalid(e) => ??? // convert exception to NonEmptyList[String]
+      case Validated.Valid(Some(account)) => NonEmptyList.of(s"Already existing account with no $no").invalid[Account]
+      case Validated.Valid(None) => ??? // run open new account
+      case Validated.Invalid(e) => ??? // convert exception to NonEmptyList[String]
     }
   }
 
   def close(no: String, closeDate: Option[ZonedDateTime]): AccountOperation[Account] = Kleisli { repository =>
     repository.query(no) match {
-      case Valid(None) => NonEmptyList.of(s"Account $no does not exist.").invalid[Account]
-      case Valid(Some(account)) => ??? // run close account
-      case Invalid(e) => ??? // convert exception to NonEmptyList[String]
+      case Validated.Valid(None) => NonEmptyList.of(s"Account $no does not exist.").invalid[Account]
+      case Validated.Valid(Some(account)) => ??? // run close account
+      case Validated.Invalid(e) => ??? // convert exception to NonEmptyList[String]
     }
   }
 
@@ -71,8 +69,8 @@ class AccountServiceInterpreter extends AccountService[Account, Amount, Balance]
 
   def balance(no: String): AccountOperation[Balance] = Kleisli { repository =>
     repository.balance(no) match {
-      case i@Invalid(e) => ??? // convert to NonEmptyList[String]
-      case v@Valid(b) => v
+      case v@ Validated.Valid(b) => v
+      case i@ Validated.Invalid(e) => ??? // convert to NonEmptyList[String]
     }
   }
 }
@@ -133,15 +131,9 @@ object Reporting {
 // some free monads
 // (a free monad is a way of deriving a monad--getting a "free" monad--from another type which is already an (endo)functor)
 
-// free monoids:
-// a free monoid is a type constructor where, given any type, the constructor gives a monoid
+import cats.free.Free
 
-// free monads:
-// a free monad is a type constructor where, given any functor, the constructor gives a monad
-
-import cats.free._
-
-// define basic algebra for account repo
+// define basic algebra for account repo application
 sealed trait AccountRepoF[+A]
 case class Query(no: String) extends AccountRepoF[Account]
 case class Store(account: Account) extends AccountRepoF[Unit]
@@ -153,12 +145,12 @@ trait AccountRepoType {
 
 trait AccountRepository2 extends AccountRepoType {
 
-  // lift the algebra's types into the monad (the implementation of the algebra is in the interpreter)
+  // put the algebra's types into the monad (the implementation of the algebra is in the interpreter)
   def store(account: Account): AccountRepo[Unit] = Free.liftF(Store(account))
   def query(no: String): AccountRepo[Account] = Free.liftF(Query(no))
   def delete(no: String): AccountRepo[Unit] = Free.liftF(Delete(no))
 
-  // and then use the monad to compose more complex operations:
+  // and then use the (free) monad to compose more exciting operations
 
   def update(no: String, f: Account => Account): AccountRepo[Unit] = for {
     a <- query(no)
@@ -185,7 +177,7 @@ trait AccountRepositoryInterpreter[F[_]] extends AccountRepoType {
   def apply[A](action: AccountRepo[A]): F[A]
 }
 
-object AccountRepositoryDatabaseInterpreter extends AccountRepositoryInterpreter[Id] {
+object AccountRepositoryExampleInterpreter extends AccountRepositoryInterpreter[Id] { // book uses scalaz Task
   val step: AccountRepoF ~> Id = new (AccountRepoF ~> Id) {
     override def apply[A](fa: AccountRepoF[A]): Id[A] = fa match {
       case Query(no) => ??? // get from db
@@ -201,12 +193,40 @@ import cats.data.StateT
 
 object AccountRepositoryState {
   type AccountMap = Map[String, Account]
-  type Err[A] = Validated[NonEmptyList[String], A]
-  type AccountState[A] = StateT[Err, AccountMap, A]
+
+  type Errors = NonEmptyList[String]
+  type Valid[A] = Either[Errors, A] // Use Either. Validated isn't a monad, so AccountState wouldn't be one either.
+
+  type AccountState[A] = StateT[Valid, AccountMap, A]
 }
 
-object AccountRepositoryStateInterpreter extends AccountRepositoryInterpreter[AccountRepositoryState.AccountState] {
+object AccountRepositoryAccountStateInterpreter extends AccountRepositoryInterpreter[AccountRepositoryState.AccountState] {
   import AccountRepositoryState._
 
-  def apply[A](action: AccountRepo[A]): AccountState[A] = ???
+  val step: AccountRepoF ~> AccountState = new (AccountRepoF ~> AccountState) {
+    override def apply[A](fa: AccountRepoF[A]): AccountState[A] = fa match {
+      case Query(no) => StateT { map =>
+        map.get(no) match {
+          case Some(a) => Right((map, a))
+          case None => Left(NonEmptyList.of(s"Account $no does not exist."))
+        }
+      }
+
+      case Store(account) => StateT { map =>
+        map.get(account.no) match {
+          case Some(a) => Left(NonEmptyList.of(s"Account $account.no already exists."))
+          case None => Right((map + (account.no -> account), ()))
+        }
+      }
+
+      case Delete(no) => StateT { map =>
+        map.get(no) match {
+          case Some(a) => Right((map - no, ()))
+          case None => Left(NonEmptyList.of(s"Account $no does not exist."))
+        }
+      }
+    }
+  }
+
+  def apply[A](action: AccountRepo[A]): AccountState[A] = action.foldMap(step)
 }
