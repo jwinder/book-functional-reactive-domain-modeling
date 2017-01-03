@@ -232,12 +232,14 @@ object AccountRepositoryAccountStateInterpreter extends AccountRepositoryInterpr
 }
 
 object ExampleAccountProgram extends AccountRepository2 {
-  def give1000DollarsTo(name: String) = AccountRepositoryAccountStateInterpreter {
+  import AccountRepositoryState._
+
+  def give1000DollarsTo(name: String): Valid[(AccountMap, Account)] = AccountRepositoryAccountStateInterpreter {
     val accountNumber = scala.util.Random.nextString(10)
     for {
       _ <- open(accountNumber, name)
       _ <- updateBalance(accountNumber, Amount(1000.00))
       a <- query(accountNumber)
     } yield a
-  }
+  }.run(Map.empty)
 }
