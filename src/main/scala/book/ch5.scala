@@ -67,11 +67,8 @@ class AccountServiceInterpreter extends AccountService[Account, Amount, Balance]
   def debit(no: String, amount: Amount): AccountOperation[Account] = ???
   def credit(no: String, amount: Amount): AccountOperation[Account] = ???
 
-  def balance(no: String): AccountOperation[Balance] = Kleisli { repository =>
-    repository.balance(no) match {
-      case v@ Validated.Valid(b) => v
-      case i@ Validated.Invalid(e) => ??? // convert to NonEmptyList[String]
-    }
+  def balance(no: String): AccountOperation[Balance] = Kleisli[Valid, AccountRepository, Balance] { repository =>
+    repository.balance(no).leftMap(e => ???) // convert to NonEmptyList[String]
   }
 }
 
@@ -205,6 +202,7 @@ object AccountRepositoryAccountStateInterpreter extends AccountRepositoryInterpr
 
   val step: AccountRepoF ~> AccountState = new (AccountRepoF ~> AccountState) {
     override def apply[A](fa: AccountRepoF[A]): AccountState[A] = fa match {
+
       case Query(no) => StateT { map =>
         map.get(no) match {
           case Some(a) => Right((map, a))
@@ -212,19 +210,8 @@ object AccountRepositoryAccountStateInterpreter extends AccountRepositoryInterpr
         }
       }
 
-      case Store(account) => StateT { map =>
-        map.get(account.no) match {
-          case Some(a) => Left(NonEmptyList.of(s"Account $account.no already exists."))
-          case None => Right((map + (account.no -> account), ()))
-        }
-      }
-
-      case Delete(no) => StateT { map =>
-        map.get(no) match {
-          case Some(a) => Right((map - no, ()))
-          case None => Left(NonEmptyList.of(s"Account $no does not exist."))
-        }
-      }
+      case Store(account) => StateT[Valid, AccountMap, A] { map => Right((map + (account.no -> account), ())) }
+      case Delete(no) => StateT[Valid, AccountMap, A] { map => Right((map - no, ())) }
     }
   }
 
@@ -235,7 +222,7 @@ object ExampleAccountProgram extends AccountRepository2 {
   import AccountRepositoryState._
 
   def give1000DollarsTo(name: String): Valid[(AccountMap, Account)] = AccountRepositoryAccountStateInterpreter {
-    val accountNumber = scala.util.Random.nextString(10)
+    val accountNumber = java.util.UUID.randomUUID().toString()
     for {
       _ <- open(accountNumber, name)
       _ <- updateBalance(accountNumber, Amount(1000.00))
