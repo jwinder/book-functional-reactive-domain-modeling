@@ -157,13 +157,11 @@ trait AccountRepository2 extends AccountRepoType {
     _ <- store(f(a))
   } yield ()
 
-  def updateBalance(no: String, amount: Amount, f: (Account, Amount) => Account): AccountRepo[Unit] = for {
-    a <- query(no)
-    _ <- store(f(a, amount))
-  } yield ()
+  def updateBalance(no: String, amount: Amount): AccountRepo[Unit] =
+    update(no, _.copy(balance = Balance(amount)))
 
-  def open(no: String, name: String, balance: Balance, openingDate: ZonedDateTime): AccountRepo[Account]= for {
-    _ <- store(Account(no, name, balance, openingDate))
+  def open(no: String, name: String): AccountRepo[Account]= for {
+    _ <- store(Account(no, name, Balance(Amount(0)), ZonedDateTime.now))
     a <- query(no)
   } yield a
 
@@ -177,12 +175,14 @@ trait AccountRepositoryInterpreter[F[_]] extends AccountRepoType {
   def apply[A](action: AccountRepo[A]): F[A]
 }
 
-object AccountRepositoryExampleInterpreter extends AccountRepositoryInterpreter[Id] { // book uses scalaz Task
+object AccountRepositoryInMemoryInterpreter extends AccountRepositoryInterpreter[Id] { // book uses scalaz Task
+  private val map = scala.collection.mutable.Map.empty[String, Account]
+
   val step: AccountRepoF ~> Id = new (AccountRepoF ~> Id) {
     override def apply[A](fa: AccountRepoF[A]): Id[A] = fa match {
-      case Query(no) => ??? // get from db
-      case Store(account) => ??? // store in db
-      case Delete(no) => ??? // del from db
+      case Query(no) => map(no)
+      case Store(account) => map.put(account.no, account); ()
+      case Delete(no) => map.remove(no); ()
     }
   }
 
@@ -195,7 +195,7 @@ object AccountRepositoryState {
   type AccountMap = Map[String, Account]
 
   type Errors = NonEmptyList[String]
-  type Valid[A] = Either[Errors, A] // Use Either. Validated isn't a monad, so AccountState wouldn't be one either.
+  type Valid[A] = Either[Errors, A] // Use Either. Validated isn't a monad, so AccountState won't be one either.
 
   type AccountState[A] = StateT[Valid, AccountMap, A]
 }
@@ -229,4 +229,15 @@ object AccountRepositoryAccountStateInterpreter extends AccountRepositoryInterpr
   }
 
   def apply[A](action: AccountRepo[A]): AccountState[A] = action.foldMap(step)
+}
+
+object ExampleAccountProgram extends AccountRepository2 {
+  def give1000DollarsTo(name: String) = AccountRepositoryAccountStateInterpreter {
+    val accountNumber = scala.util.Random.nextString(10)
+    for {
+      _ <- open(accountNumber, name)
+      _ <- updateBalance(accountNumber, Amount(1000.00))
+      a <- query(accountNumber)
+    } yield a
+  }
 }
