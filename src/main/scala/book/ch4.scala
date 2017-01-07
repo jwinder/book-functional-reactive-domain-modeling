@@ -1,5 +1,5 @@
 package example.book.ch4
-import java.time.ZonedDateTime
+import java.time.Instant
 import cats._
 import cats.instances.all._
 import cats.syntax.all._
@@ -102,7 +102,7 @@ case class Money(m: Map[Currency, BigDecimal]) {
 case class Transaction(
   txid: String,
   accountNo: String,
-  date: ZonedDateTime,
+  date: Instant,
   amount: Money,
   txnType: TransactionType,
   status: Boolean
@@ -157,12 +157,12 @@ trait Trading[Account, Market, Order, ClientOrder, Execution, Trade] {
 }
 
 case class LoanApplication[Loans](
-  date: ZonedDateTime,
+  date: Instant,
   name: String,
   purpose: String,
   repayIn: Int,
   actualRepaymentYears: Option[Int] = None,
-  startDate: Option[ZonedDateTime] = None,
+  startDate: Option[Instant] = None,
   loanNo: Option[String] = None,
   emi: Option[BigDecimal] = none
 )
@@ -176,14 +176,14 @@ object LoanApplication {
   type LoanApproved = LoanApplication[Approved]
   type LoanEnriched = LoanApplication[Enriched]
 
-  def applyLoan(name: String, purpose: String, repayIn: Int, date: ZonedDateTime = ZonedDateTime.now): LoanApplied =
+  def applyLoan(name: String, purpose: String, repayIn: Int, date: Instant = Instant.now): LoanApplied =
     LoanApplication[Applied](date, name, purpose, repayIn)
 
   def approve = Kleisli[Option, LoanApplied, LoanApproved] { loan =>
     loan.copy[Approved](
       loanNo = mkLoanNo().some,
       actualRepaymentYears = 15.some,
-      startDate = ZonedDateTime.now.some
+      startDate = Instant.now.some
     ).some
   }
 
@@ -196,5 +196,5 @@ object LoanApplication {
   }
 
   private def mkLoanNo(): String = ???
-  private def calculateEMI(tenure: Int, start: ZonedDateTime): BigDecimal = ???
+  private def calculateEMI(tenure: Int, start: Instant): BigDecimal = ???
 }

@@ -1,5 +1,5 @@
 package example.book.ch5
-import java.time.ZonedDateTime
+import java.time.Instant
 import scala.util.{Try, Success, Failure}
 
 import cats._
@@ -7,7 +7,7 @@ import cats.instances.all._
 import cats.syntax.all._
 import cats.data.{Validated, ValidatedNel, Kleisli, NonEmptyList}
 
-case class Account(no: String, name: String, balance: Balance, openingDate: ZonedDateTime, closingDate: Option[ZonedDateTime] = None)
+case class Account(no: String, name: String, balance: Balance, openingDate: Instant, closingDate: Option[Instant] = None)
 case class Balance(amount: Amount)
 case class Amount(amount: BigDecimal)
 
@@ -27,7 +27,7 @@ trait AccountRepository extends Repository[Account, String] {
     case Validated.Valid(None) => Validated.Invalid(new Exception(s"No account exists with no $no"))
     case Validated.Invalid(ex) => Validated.Invalid(ex)
   }
-  def query(openedOn: ZonedDateTime): Validated[Exception, Seq[Account]]
+  def query(openedOn: Instant): Validated[Exception, Seq[Account]]
 }
 
 trait ValidType {
@@ -37,8 +37,8 @@ trait ValidType {
 trait AccountService[Account, Amount, Balance] extends ValidType {
   type AccountOperation[A] = Kleisli[Valid, AccountRepository, A]
 
-  def open(no: String, closeDate: Option[ZonedDateTime]): AccountOperation[Account]
-  def close(no: String, closeDate: Option[ZonedDateTime]): AccountOperation[Account]
+  def open(no: String, closeDate: Option[Instant]): AccountOperation[Account]
+  def close(no: String, closeDate: Option[Instant]): AccountOperation[Account]
   def debit(no: String, amount: Amount): AccountOperation[Account]
   def credit(no: String, amount: Amount): AccountOperation[Account]
   def balance(no: String): AccountOperation[Balance]
@@ -48,7 +48,7 @@ trait AccountService[Account, Amount, Balance] extends ValidType {
 }
 
 class AccountServiceInterpreter extends AccountService[Account, Amount, Balance] {
-  def open(no: String, closeDate: Option[ZonedDateTime]): AccountOperation[Account] = Kleisli { repository =>
+  def open(no: String, closeDate: Option[Instant]): AccountOperation[Account] = Kleisli { repository =>
     repository.query(no) match {
       case Validated.Valid(Some(account)) => NonEmptyList.of(s"Already existing account with no $no").invalid[Account]
       case Validated.Valid(None) => ??? // run open new account
@@ -56,7 +56,7 @@ class AccountServiceInterpreter extends AccountService[Account, Amount, Balance]
     }
   }
 
-  def close(no: String, closeDate: Option[ZonedDateTime]): AccountOperation[Account] = Kleisli { repository =>
+  def close(no: String, closeDate: Option[Instant]): AccountOperation[Account] = Kleisli { repository =>
     repository.query(no) match {
       case Validated.Valid(None) => NonEmptyList.of(s"Account $no does not exist.").invalid[Account]
       case Validated.Valid(Some(account)) => ??? // run close account
@@ -158,12 +158,12 @@ trait AccountRepository2 extends AccountRepoType {
     update(no, _.copy(balance = Balance(amount)))
 
   def open(no: String, name: String): AccountRepo[Account]= for {
-    _ <- store(Account(no, name, Balance(Amount(0)), ZonedDateTime.now))
+    _ <- store(Account(no, name, Balance(Amount(0)), Instant.now))
     a <- query(no)
   } yield a
 
   def close(no: String): AccountRepo[Account] = for {
-    _ <- update(no, _.copy(closingDate = Some(ZonedDateTime.now)))
+    _ <- update(no, _.copy(closingDate = Some(Instant.now)))
     a <- query(no)
   } yield a
 }
