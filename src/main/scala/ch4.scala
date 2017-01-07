@@ -1,4 +1,4 @@
-package example.book.ch4
+package example.ch4
 import java.time.Instant
 import cats._
 import cats.instances.all._

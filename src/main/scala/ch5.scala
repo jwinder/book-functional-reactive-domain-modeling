@@ -1,4 +1,4 @@
-package example.book.ch5
+package example.ch5
 import java.time.Instant
 import scala.util.{Try, Success, Failure}
 
